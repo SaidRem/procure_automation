@@ -5,6 +5,28 @@ build/
 dist/
 wheels/
 *.egg-info
+.claude/
+.env
+
+# Internal project documentation
+docs/project/
 
 # Virtual environments
 .venv
+
+# Private project materials
+private/
+
+# IDE
+.vscode/
+.idea/
+
+# Django
+*.log
+db.sqlite3
+media/
+staticfiles/
+
+# OS
+.DS_Store
+Thumbs.db
