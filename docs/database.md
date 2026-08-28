@@ -17,7 +17,7 @@ PostgreSQL.
 
 ## Main entities
 
-По приложениям (см. .claude/architecture.md):
+По приложениям:
 
 ### users
 
@@ -59,6 +59,12 @@ PostgreSQL.
 - orders.OrderItem → orders.Order, catalog.ProductInfo (nullable)
 - suppliers.Shop → users.User (one-to-one)
 
-Направление зависимостей между приложениями:
+Направление зависимостей между приложениями (уровень моделей/ORM):
 users ← suppliers ← catalog ← orders ← notifications.
-Обратные зависимости не допускаются без нового ADR.
+Прямой обратный импорт ORM-моделей (например, suppliers импортирует
+модели catalog напрямую) не допускается без нового ADR.
+
+Обращение к данным домена, стоящего "выше" по цепочке, разрешено только
+через его публичный сервисный слой (`<app>.services`), а не напрямую к
+ORM — например, suppliers обращается к catalog.services при импорте
+прайса (ADR-002, ADR-005, docs/decisions.md).
