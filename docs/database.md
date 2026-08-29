@@ -60,7 +60,24 @@ PostgreSQL.
 - suppliers.Shop → users.User (one-to-one)
 
 Направление зависимостей между приложениями (уровень моделей/ORM):
-users ← suppliers ← catalog ← orders ← notifications.
+
+```
+notifications   ← верхний уровень
+  │
+  │ «зависит от»
+  ▼
+orders
+  │
+  ▼
+catalog
+  │
+  ▼
+suppliers
+  │
+  ▼
+users           ← базовый домен, ни от кого не зависит
+```
+
 Прямой обратный импорт ORM-моделей (например, suppliers импортирует
 модели catalog напрямую) не допускается без нового ADR.
 
