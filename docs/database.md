@@ -46,9 +46,28 @@ PostgreSQL.
 
 ### orders
 
-- Order (dt, state; FK -> User, FK -> users.Contact)
+- Order (dt, state; FK -> User, FK -> users.Contact — nullable)
+
+  Корзина — это Order в состоянии state='basket' (ADR-009), отдельной
+  модели корзины нет. Следствия для схемы:
+
+  - UniqueConstraint(fields=['user'], condition=Q(state='basket')) —
+    не более одной корзины на пользователя;
+  - contact nullable: корзина существует без адреса доставки,
+    обязательность контакта проверяется в сервисе подтверждения заказа;
+  - dt (auto_now_add) — момент создания корзины, а не оформления заказа;
+    для истории заказов требуется отдельная отметка времени
+    подтверждения (поле определяется при реализации orders).
+
 - OrderItem (quantity, snapshot-поля — product_name, shop_name, price,
   price_rrc; FK -> catalog.ProductInfo, nullable, on_delete=SET_NULL)
+
+  Snapshot-поля допускают пустое значение: они заполняются один раз в
+  момент подтверждения заказа (ADR-003) и до этого не заданы. Пока
+  Order находится в состоянии basket, источник цены и наименования —
+  текущий catalog.ProductInfo; после подтверждения — snapshot-поля
+  самого OrderItem. Сумма корзины и сумма оформленного заказа
+  считаются по разным источникам данных (ADR-009).
 
 ### notifications
 
@@ -61,7 +80,9 @@ PostgreSQL.
 - catalog.ProductInfo → suppliers.Shop, catalog.Product (many-to-one)
 - catalog.ProductParameter → catalog.ProductInfo, catalog.Parameter
 - orders.Order → users.User, users.Contact
-- orders.OrderItem → orders.Order, catalog.ProductInfo (nullable)
+- orders.OrderItem → orders.Order, catalog.ProductInfo (nullable;
+  используется как ссылка на актуальную карточку товара и как источник
+  цены для корзины, но не для расчёта оформленного заказа)
 - suppliers.Shop → users.User (one-to-one)
 
 Направление зависимостей между приложениями (уровень моделей/ORM):
