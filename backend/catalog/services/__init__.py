@@ -18,6 +18,7 @@ from catalog.services.exceptions import (
     UnknownShop,
 )
 from catalog.services.price_import import upsert_shop_price
+from catalog.services.validation import validate_price_data
 
 __all__ = (
     "CatalogServiceError",
@@ -29,4 +30,5 @@ __all__ = (
     "PriceData",
     "UnknownShop",
     "upsert_shop_price",
+    "validate_price_data",
 )
