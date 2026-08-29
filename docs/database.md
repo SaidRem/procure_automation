@@ -24,8 +24,28 @@ PostgreSQL.
 
 ### users
 
-- User (кастомная модель, email как USERNAME_FIELD, type: buyer/shop)
-- Contact (адрес доставки, телефон; FK -> User)
+Реализовано (миграция users/0001_initial).
+
+- User (кастомная модель, наследник AbstractUser, ADR-004):
+  username удалён (username = None), USERNAME_FIELD = 'email',
+  REQUIRED_FIELDS = [];
+  email — EmailField(unique=True);
+  first_name, last_name — CharField(max_length=150, blank);
+  company, position — CharField(max_length=40, blank);
+  type — CharField(max_length=5, choices buyer/shop, default 'buyer');
+  is_active — BooleanField(default=False), пользователь активируется после
+  подтверждения email; суперпользователь создаётся сразу с is_active=True
+  (users.managers.UserManager).
+  Meta: ordering ('email',). Других ограничений, кроме unique email, нет.
+
+- Contact (адрес доставки; FK -> User, related_name='contacts',
+  on_delete=CASCADE):
+  city — CharField(max_length=50), street — CharField(max_length=100),
+  phone — CharField(max_length=20) — обязательные;
+  house, structure, building, apartment — CharField(max_length=15, blank).
+  Constraints и soft delete отсутствуют намеренно (ADR-003): историчность
+  адреса доставки обеспечивается snapshot-полями Order на момент
+  подтверждения заказа, а не сохранением записи Contact.
 
 ### suppliers
 
