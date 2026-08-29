@@ -224,3 +224,32 @@ services/order_service.py
     |
     v
 models.py
+
+---
+
+## ADR-007 — API authentication strategy
+
+Date: 2026-08-29
+
+Status: Accepted
+
+Decision:
+
+Аутентификация API строится на JWT.
+
+Реализация — библиотека `djangorestframework-simplejwt`.
+
+Reason:
+
+- Требуется stateless-аутентификация для REST API, используемого
+  как внешними клиентами, так и фронтенд-приложением.
+- `djangorestframework-simplejwt` — стандартное для DRF решение,
+  совместимое с кастомной моделью `User` (ADR-004, email как
+  `USERNAME_FIELD`).
+
+Consequences:
+
+- Детали реализации (время жизни токенов, refresh/rotation,
+  blacklist, набор endpoints выдачи и обновления токена, настройки
+  `SIMPLE_JWT` и `REST_FRAMEWORK`) на данном этапе не фиксируются
+  и определяются при реализации.
