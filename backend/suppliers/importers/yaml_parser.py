@@ -2,8 +2,8 @@
 
 Модуль отвечает только за формат: чтение файла, проверку структуры,
 приведение типов и разрешение внешних идентификаторов категорий в их
-названия (ADR-013). Результат — объекты публичного сервисного слоя
-каталога (ADR-016).
+названия (ADR-013). Результат — метаданные магазина и данные каталога в
+объектах публичного сервисного слоя каталога (ADR-016).
 
 Парсер не обращается к базе данных, не импортирует ORM-модели `catalog`
 и ничего не создаёт: запись выполняет `catalog.services`.
@@ -25,6 +25,7 @@ from catalog.services import (
     PriceData,
     validate_price_data,
 )
+from suppliers.importers.dto import SupplierPriceFile
 from suppliers.importers.exceptions import PriceParseError
 
 logger = logging.getLogger(__name__)
@@ -36,13 +37,18 @@ REQUIRED_OFFER_KEYS = ("id", "category", "name", "price", "price_rrc", "quantity
 BOOLEAN_VALUES = {True: "да", False: "нет"}
 
 
-def parse_price_yaml(yaml_content: str) -> PriceData:
-    """Разобрать прайс поставщика и вернуть проверенные данные.
+def parse_price_file(yaml_content: str) -> SupplierPriceFile:
+    """Разобрать файл прайса поставщика.
+
+    Возвращает метаданные магазина (`shop_name`, `shop_url`) и данные
+    каталога (`price`), полученные за один разбор файла. Метаданные
+    предназначены для сверки с записью магазина и не изменяют её
+    (ADR-012).
 
     Возбуждает `PriceParseError`, если файл не разбирается, не
     соответствует ожидаемой структуре или нарушает правила прайса
-    (ADR-017). При успехе возвращённый `PriceData` пригоден для передачи
-    в `catalog.services.upsert_shop_price` без дополнительных проверок.
+    (ADR-017). При успехе `price` пригоден для передачи в
+    `catalog.services.upsert_shop_price` без дополнительных проверок.
     """
     data = _load(yaml_content)
     categories = _parse_categories(data["categories"])
@@ -60,10 +66,31 @@ def parse_price_yaml(yaml_content: str) -> PriceData:
     except InvalidPriceData as error:
         raise PriceParseError(str(error)) from error
 
-    logger.info(
-        "Price parsed: categories=%s offers=%s", len(price.categories), len(price.offers)
+    price_file = SupplierPriceFile(
+        shop_name=_as_text(data["shop"], "shop"),
+        shop_url=_parse_shop_url(data.get("url")),
+        price=price,
     )
-    return price
+
+    logger.info(
+        "Price file parsed: shop=%r categories=%s offers=%s",
+        price_file.shop_name,
+        len(price.categories),
+        len(price.offers),
+    )
+    return price_file
+
+
+def _parse_shop_url(raw: Any) -> str | None:
+    """Разобрать необязательную ссылку магазина.
+
+    В прайсе требований (`private/shop1.yaml`) раздела `url` нет, поэтому
+    его отсутствие ошибкой не является.
+    """
+    if raw is None:
+        return None
+
+    return _as_text(raw, "url")
 
 
 def _load(yaml_content: str) -> dict[str, Any]:
@@ -79,10 +106,6 @@ def _load(yaml_content: str) -> dict[str, Any]:
     missing = [key for key in REQUIRED_ROOT_KEYS if key not in data]
     if missing:
         raise PriceParseError(f"В прайсе отсутствуют разделы: {missing}.")
-
-    # Название магазина в каталог не передаётся (им владеет suppliers),
-    # но его отсутствие означает неполный файл.
-    _as_text(data["shop"], "shop")
 
     return data
 

@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass
 from decimal import Decimal
 
 
@@ -51,7 +51,12 @@ class PriceData:
 
 @dataclass(frozen=True, slots=True)
 class ImportResult:
-    """Итог импорта прайса в каталог."""
+    """Итог импорта прайса в каталог.
+
+    Содержит только целочисленные счётчики: результат сериализуется в
+    JSON для журналов и фоновых задач (ADR-005), и значения других типов
+    сломали бы сериализацию уже после успешного импорта.
+    """
 
     offers_total: int = 0
     created: int = 0
@@ -60,3 +65,11 @@ class ImportResult:
     deactivated: int = 0
     products_created: int = 0
     categories_linked: int = 0
+
+    def to_dict(self) -> dict[str, int]:
+        """Представление результата для журналов и фоновых задач.
+
+        Собирается из полей dataclass, поэтому новый счётчик попадает в
+        результат автоматически.
+        """
+        return asdict(self)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import fields
 from decimal import Decimal
 
 import pytest
@@ -9,6 +11,7 @@ import pytest
 from catalog.models import Category, Parameter, Product, ProductInfo, ProductParameter
 from catalog.services import (
     CategoryData,
+    ImportResult,
     InvalidPriceData,
     OfferData,
     ParameterData,
@@ -369,3 +372,26 @@ class TestValidation:
 
         assert Category.objects.count() == 0
         assert Product.objects.count() == 0
+
+
+class TestImportResultSerialization:
+    """Представление результата импорта для журналов и фоновых задач."""
+
+    def test_contains_every_counter(self) -> None:
+        result = ImportResult()
+
+        assert set(result.to_dict()) == {field.name for field in fields(ImportResult)}
+
+    def test_values_are_returned(self) -> None:
+        result = ImportResult(offers_total=3, created=1, updated=1, reactivated=1)
+
+        assert result.to_dict()["reactivated"] == 1
+        assert result.to_dict()["offers_total"] == 3
+
+    def test_is_json_serializable(self) -> None:
+        result = ImportResult(created=2, deactivated=1)
+
+        assert json.loads(json.dumps(result.to_dict()))["created"] == 2
+
+    def test_all_counters_are_integers(self) -> None:
+        assert all(isinstance(value, int) for value in ImportResult().to_dict().values())

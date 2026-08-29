@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from django.conf import settings
 
-from suppliers.importers.exceptions import PriceParseError
-from suppliers.importers.yaml_parser import parse_price_yaml
+from catalog.services import PriceData
+from suppliers.importers import PriceParseError, SupplierPriceFile, parse_price_file
 
 PRICE = textwrap.dedent(
     """
@@ -41,6 +41,11 @@ PRICE = textwrap.dedent(
 )
 
 
+def parse_catalog(yaml_content: str) -> PriceData:
+    """Вернуть данные каталога из разобранного файла прайса."""
+    return parse_price_file(yaml_content).price
+
+
 def price_with(goods: str, categories: str | None = None) -> str:
     """Собрать прайс с произвольными разделами goods и categories."""
     categories = categories if categories is not None else """
@@ -54,7 +59,7 @@ class TestValidPrice:
     """Разбор корректного прайса."""
 
     def test_returns_categories_and_offers(self) -> None:
-        price = parse_price_yaml(PRICE)
+        price = parse_catalog(PRICE)
 
         assert [category.name for category in price.categories] == [
             "Смартфоны",
@@ -63,12 +68,12 @@ class TestValidPrice:
         assert len(price.offers) == 1
 
     def test_external_category_id_is_resolved_to_name(self) -> None:
-        offer = parse_price_yaml(PRICE).offers[0]
+        offer = parse_catalog(PRICE).offers[0]
 
         assert offer.category_name == "Смартфоны"
 
     def test_offer_fields_are_converted(self) -> None:
-        offer = parse_price_yaml(PRICE).offers[0]
+        offer = parse_catalog(PRICE).offers[0]
 
         assert offer.external_id == 4216292
         assert offer.product_name.startswith("Смартфон Apple iPhone XS Max")
@@ -78,7 +83,7 @@ class TestValidPrice:
         assert offer.price_rrc == Decimal("116990")
 
     def test_parameter_values_become_strings(self) -> None:
-        offer = parse_price_yaml(PRICE).offers[0]
+        offer = parse_catalog(PRICE).offers[0]
 
         assert {parameter.name: parameter.value for parameter in offer.parameters} == {
             "Диагональ (дюйм)": "6.5",
@@ -87,7 +92,7 @@ class TestValidPrice:
         }
 
     def test_boolean_parameter_becomes_yes_or_no(self) -> None:
-        offer = parse_price_yaml(
+        offer = parse_catalog(
             price_with(
                 """
       - id: 1
@@ -109,7 +114,7 @@ class TestValidPrice:
         }
 
     def test_fractional_price_keeps_kopecks(self) -> None:
-        price = parse_price_yaml(
+        price = parse_catalog(
             price_with(
                 """
       - id: 1
@@ -126,7 +131,7 @@ class TestValidPrice:
         assert price.offers[0].price_rrc == Decimal("2499.90")
 
     def test_optional_fields_have_defaults(self) -> None:
-        offer = parse_price_yaml(
+        offer = parse_catalog(
             price_with(
                 """
       - id: 1
@@ -143,20 +148,52 @@ class TestValidPrice:
         assert offer.parameters == ()
 
 
+class TestShopMetadata:
+    """Метаданные магазина из того же разбора файла (ADR-012)."""
+
+    def test_shop_name_is_returned(self) -> None:
+        price_file = parse_price_file(PRICE)
+
+        assert isinstance(price_file, SupplierPriceFile)
+        assert price_file.shop_name == "Связной"
+
+    def test_url_is_optional(self) -> None:
+        assert parse_price_file(PRICE).shop_url is None
+
+    def test_url_is_returned_when_present(self) -> None:
+        content = PRICE.replace(
+            "shop: Связной", "shop: Связной\nurl: https://example.com/price.yaml"
+        )
+
+        assert parse_price_file(content).shop_url == "https://example.com/price.yaml"
+
+    def test_non_text_url_is_rejected(self) -> None:
+        content = PRICE.replace("shop: Связной", "shop: Связной\nurl: 42")
+
+        with pytest.raises(PriceParseError):
+            parse_price_file(content)
+
+    def test_catalog_data_is_returned_alongside_metadata(self) -> None:
+        price_file = parse_price_file(PRICE)
+
+        assert len(price_file.price.offers) == 1
+        assert price_file.price.categories[0].name == "Смартфоны"
+
+
 class TestStructureErrors:
     """Ошибки структуры файла."""
 
     def test_broken_yaml(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml("shop: Связной\n  goods: [")
+            parse_catalog("shop: Связной\n  goods: [")
 
     def test_root_is_not_a_mapping(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml("- 1\n- 2\n")
+            parse_catalog("- 1\n- 2\n")
 
     def test_empty_document(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml("")
+            parse_catalog("")
 
     @pytest.mark.parametrize("section", ["shop", "categories", "goods"])
     def test_missing_root_section(self, section: str) -> None:
@@ -164,19 +201,19 @@ class TestStructureErrors:
         content = "\n".join(lines)
 
         with pytest.raises(PriceParseError):
-            parse_price_yaml(content if section != "shop" else content)
+            parse_catalog(content if section != "shop" else content)
 
     def test_shop_name_must_be_text(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml(PRICE.replace("shop: Связной", "shop: 42"))
+            parse_catalog(PRICE.replace("shop: Связной", "shop: 42"))
 
     def test_goods_must_be_a_list(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml("shop: Связной\ncategories: []\ngoods: 5\n")
+            parse_catalog("shop: Связной\ncategories: []\ngoods: 5\n")
 
     def test_offer_without_required_field(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml(
+            parse_catalog(
                 price_with(
                     """
       - id: 1
@@ -190,7 +227,7 @@ class TestStructureErrors:
 
     def test_category_without_name(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml(
+            parse_catalog(
                 price_with(
                     """
       - id: 1
@@ -208,7 +245,7 @@ class TestStructureErrors:
 
     def test_duplicate_category_id(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml(
+            parse_catalog(
                 price_with(
                     """
       - id: 1
@@ -229,7 +266,7 @@ class TestStructureErrors:
 
     def test_unknown_category_reference(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml(
+            parse_catalog(
                 price_with(
                     """
       - id: 1
@@ -244,7 +281,7 @@ class TestStructureErrors:
 
     def test_price_must_be_a_number(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml(
+            parse_catalog(
                 price_with(
                     """
       - id: 1
@@ -259,7 +296,7 @@ class TestStructureErrors:
 
     def test_unsupported_parameter_value_is_rejected(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml(
+            parse_catalog(
                 price_with(
                     """
       - id: 1
@@ -282,11 +319,11 @@ class TestPriceRules:
 
     def test_empty_goods_is_rejected(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml("shop: Связной\ncategories: []\ngoods: []\n")
+            parse_catalog("shop: Связной\ncategories: []\ngoods: []\n")
 
     def test_duplicate_external_id_is_rejected(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml(
+            parse_catalog(
                 price_with(
                     """
       - id: 1
@@ -307,7 +344,7 @@ class TestPriceRules:
 
     def test_negative_price_is_rejected(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml(
+            parse_catalog(
                 price_with(
                     """
       - id: 1
@@ -322,7 +359,7 @@ class TestPriceRules:
 
     def test_negative_quantity_is_rejected(self) -> None:
         with pytest.raises(PriceParseError):
-            parse_price_yaml(
+            parse_catalog(
                 price_with(
                     """
       - id: 1
@@ -344,7 +381,10 @@ class TestReferencePrice:
     """Разбор реального прайса из требований."""
 
     def test_shop1_is_parsed(self) -> None:
-        price = parse_price_yaml(SHOP1.read_text(encoding="utf-8"))
+        price_file = parse_price_file(SHOP1.read_text(encoding="utf-8"))
+        price = price_file.price
+
+        assert price_file.shop_name == "Связной"
 
         assert len(price.categories) == 4
         assert len(price.offers) == 14

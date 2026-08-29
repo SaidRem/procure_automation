@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from suppliers.models import Shop
 from users.models import User, UserType
 
 
@@ -16,3 +17,9 @@ def shop_user(db) -> User:
         is_active=True,
         type=UserType.SHOP,
     )
+
+
+@pytest.fixture
+def shop(db) -> Shop:
+    """Магазин без привязки к пользователю."""
+    return Shop.objects.create(name="Связной")
