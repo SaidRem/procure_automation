@@ -193,7 +193,21 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "Backend сервиса автоматизации закупок",
     "VERSION": "0.1.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "TAGS": [
+        {"name": "auth", "description": "Регистрация, подтверждение email, JWT, сброс пароля"},
+        {"name": "users", "description": "Профиль и контакты текущего пользователя"},
+    ],
 }
+
+
+# Ссылки в письмах (подтверждение email, сброс пароля).
+
+FRONTEND_URL = env("FRONTEND_URL", "http://localhost:8000").rstrip("/")
+
+# Время жизни токенов подтверждения email и сброса пароля (секунды).
+# Оба механизма используют генераторы Django, читающие эту настройку.
+
+PASSWORD_RESET_TIMEOUT = int(env("PASSWORD_RESET_TIMEOUT", str(60 * 60 * 24)))
 
 
 # JWT authentication (ADR-007)
