@@ -13,6 +13,9 @@ PostgreSQL.
 - Historical records must be preserved.
 - Изменение каталога (Product/ProductInfo) не изменяет историю уже
   оформленных заказов (ADR-003, docs/decisions.md).
+- Импорт прайса поставщика не удаляет ProductInfo физически: отсутствующие
+  в прайсе предложения помечаются is_active=False (ADR-008,
+  docs/decisions.md). Каталожная выдача фильтрует is_active=True.
 
 
 ## Main entities
@@ -32,9 +35,11 @@ PostgreSQL.
 
 - Category (name; M2M -> suppliers.Shop)
 - Product (name; FK -> Category)
-- ProductInfo (model, external_id, quantity, price, price_rrc;
+- ProductInfo (model, external_id, quantity, price, price_rrc,
+  is_active — BooleanField(default=True, db_index=True), soft-deactivation
+  при импорте, ADR-008;
   FK -> Product, FK -> suppliers.Shop;
-  unique(product, shop, external_id))
+  unique(shop, external_id))
 - Parameter (name)
 - ProductParameter (value; FK -> ProductInfo, FK -> Parameter;
   unique(product_info, parameter))
