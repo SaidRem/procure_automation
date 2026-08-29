@@ -16,6 +16,9 @@ PostgreSQL.
 - Импорт прайса поставщика не удаляет ProductInfo физически: отсутствующие
   в прайсе предложения помечаются is_active=False (ADR-008,
   docs/decisions.md). Каталожная выдача фильтрует is_active=True.
+- Денежные значения хранятся как DecimalField(max_digits=12,
+  decimal_places=2); float для цен и сумм не используется (ADR-015,
+  docs/decisions.md).
 
 
 ## Main entities
@@ -53,20 +56,82 @@ PostgreSQL.
 
 ### suppliers
 
-- Shop (name, url, state — приём заказов вкл/выкл; OneToOne -> User)
+Реализовано (миграция suppliers/0001_initial).
+
+- Shop (поставщик):
+  name — CharField(max_length=50, unique);
+  url — URLField(blank, null): в прайсе поставщика ссылки может не быть;
+  state — BooleanField(default=True) — приём заказов вкл/выкл, импортом
+  не изменяется;
+  user — OneToOneField -> users.User (null, blank, on_delete=PROTECT).
+
+  Идентификация магазина при импорте — по user, а не по name из прайса
+  (ADR-012). Физическое удаление Shop не предусмотрено и запрещено на
+  уровне модели: Shop.delete() возбуждает ProtectedError (ограничение
+  действует для экземпляра, массовое удаление через queryset в коде
+  проекта не используется).
+
+  Индексы: unique(name), unique(user) — из OneToOneField.
 
 ### catalog
 
-- Category (name; M2M -> suppliers.Shop)
-- Product (name; FK -> Category)
-- ProductInfo (model, external_id, quantity, price, price_rrc,
-  is_active — BooleanField(default=True, db_index=True), soft-deactivation
-  при импорте, ADR-008;
-  FK -> Product, FK -> suppliers.Shop;
-  unique(shop, external_id))
-- Parameter (name)
-- ProductParameter (value; FK -> ProductInfo, FK -> Parameter;
-  unique(product_info, parameter))
+Реализовано (миграция catalog/0001_initial, зависит от
+suppliers/0001_initial).
+
+- Category:
+  name — CharField(max_length=40, unique);
+  shops — M2M -> suppliers.Shop (related_name='categories', blank).
+
+  Внешний идентификатор категории из прайса не хранится: соответствие
+  разрешается в пределах одного импорта по секции categories файла
+  (ADR-013).
+
+  Индексы: unique(name).
+
+- Product (логический товар, ADR-001):
+  name — CharField(max_length=80);
+  category — FK -> Category (related_name='products', on_delete=PROTECT).
+
+  unique(name, category) — ключ идентификации товара при импорте
+  (ADR-014).
+
+  Индексы: unique(name, category), index(name) — под поиск в каталоге.
+
+- ProductInfo (предложение конкретного поставщика, ADR-001):
+  external_id — PositiveIntegerField, идентификатор позиции в прайсе
+  поставщика;
+  model — CharField(max_length=80, blank);
+  quantity — PositiveIntegerField;
+  price, price_rrc — DecimalField(max_digits=12, decimal_places=2)
+  (ADR-015);
+  is_active — BooleanField(default=True, db_index=True),
+  soft-deactivation при импорте (ADR-008);
+  FK -> Product (related_name='product_infos', on_delete=CASCADE);
+  FK -> suppliers.Shop (related_name='product_infos', on_delete=CASCADE).
+
+  unique(shop, external_id) — ключ upsert при импорте (ADR-008; заменяет
+  unique(product, shop, external_id) из ADR-001).
+
+  Индексы: unique(shop, external_id), index(is_active), составной
+  index(shop, is_active) — под каталожную выдачу и массовую деактивацию
+  при импорте.
+
+- Parameter:
+  name — CharField(max_length=40, unique) — ключ поиска при импорте.
+
+  Индексы: unique(name).
+
+- ProductParameter:
+  value — CharField(max_length=100);
+  FK -> ProductInfo (related_name='product_parameters',
+  on_delete=CASCADE);
+  FK -> Parameter (on_delete=PROTECT).
+
+  unique(product_info, parameter).
+
+  Значения характеристик в прайсе могут быть числами; приведение к
+  строке и проверка длины выполняются при импорте, а не моделью
+  (ADR-016).
 
 ### orders
 
@@ -107,7 +172,9 @@ PostgreSQL.
 - orders.OrderItem → orders.Order, catalog.ProductInfo (nullable;
   используется как ссылка на актуальную карточку товара и как источник
   цены для корзины, но не для расчёта оформленного заказа)
-- suppliers.Shop → users.User (one-to-one)
+- suppliers.Shop → users.User (one-to-one, on_delete=PROTECT, ADR-012)
+- catalog.Product → catalog.Category (many-to-one, on_delete=PROTECT)
+- catalog.Category → suppliers.Shop (many-to-many)
 
 Направление зависимостей между приложениями (уровень моделей/ORM):
 
