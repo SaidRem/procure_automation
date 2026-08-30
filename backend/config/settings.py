@@ -199,6 +199,8 @@ SPECTACULAR_SETTINGS = {
     "TAGS": [
         {"name": "auth", "description": "Регистрация, подтверждение email, JWT, сброс пароля"},
         {"name": "users", "description": "Профиль и контакты текущего пользователя"},
+        {"name": "catalog", "description": "Каталог предложений поставщиков"},
+        {"name": "orders", "description": "Корзина, оформление и история заказов"},
     ],
 }
 

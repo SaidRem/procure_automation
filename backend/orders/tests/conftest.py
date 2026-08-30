@@ -5,6 +5,8 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from catalog.models import Category, Product, ProductInfo
 from suppliers.models import Shop
@@ -91,4 +93,39 @@ def incomplete_contact(buyer: User) -> Contact:
         city="Москва",
         street="Тверская",
         phone="+70000000000",
+    )
+
+
+@pytest.fixture
+def api_client() -> APIClient:
+    return APIClient()
+
+
+def _authenticated(client: APIClient, user: User) -> APIClient:
+    access = RefreshToken.for_user(user).access_token
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+    return client
+
+
+@pytest.fixture
+def auth_client(api_client: APIClient, buyer: User) -> APIClient:
+    """Клиент покупателя `buyer`."""
+    return _authenticated(api_client, buyer)
+
+
+@pytest.fixture
+def other_client(other_buyer: User) -> APIClient:
+    """Клиент второго покупателя — для проверки изоляции данных."""
+    return _authenticated(APIClient(), other_buyer)
+
+
+@pytest.fixture
+def other_contact(other_buyer: User) -> Contact:
+    return Contact.objects.create(
+        user=other_buyer,
+        last_name="Иванов",
+        first_name="Иван",
+        city="Тверь",
+        street="Ленина",
+        phone="+70000000001",
     )
