@@ -19,3 +19,7 @@ class PriceSourceNotConfigured(SupplierServiceError):
 
 class ImportRunNotFound(SupplierServiceError):
     """Запись журнала импорта с указанным идентификатором не существует."""
+
+
+class ImportAlreadyRunning(SupplierServiceError):
+    """У магазина уже есть незавершённый запуск импорта (ADR-026)."""

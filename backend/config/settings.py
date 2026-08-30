@@ -202,6 +202,7 @@ SPECTACULAR_SETTINGS = {
         {"name": "users", "description": "Профиль и контакты текущего пользователя"},
         {"name": "catalog", "description": "Каталог предложений поставщиков"},
         {"name": "orders", "description": "Корзина, оформление и история заказов"},
+        {"name": "suppliers", "description": "Магазин поставщика, импорт прайса и журнал запусков"},
     ],
 }
 

@@ -12,8 +12,12 @@ from typing import TYPE_CHECKING
 
 from django.db import transaction
 
-from suppliers.models import ImportLog, ImportStatus
-from suppliers.services.exceptions import PriceSourceNotConfigured
+from suppliers.models import ImportLog, ImportStatus, Shop
+from suppliers.services.exceptions import (
+    ImportAlreadyRunning,
+    PriceSourceNotConfigured,
+    ShopNotFound,
+)
 
 if TYPE_CHECKING:
     from users.models import User
@@ -71,3 +75,47 @@ def _enqueue(shop_id: int, url: str, log_id: int) -> None:
     ImportLog.objects.filter(pk=log_id).update(task_id=task.id)
 
     logger.info("Import task queued: log_id=%s task_id=%s", log_id, task.id)
+
+
+# Состояния, в которых запуск считается незавершённым.
+UNFINISHED_STATUSES = (ImportStatus.QUEUED, ImportStatus.RUNNING)
+
+
+def request_price_import(
+    *,
+    shop_id: int,
+    initiated_by: User | None = None,
+) -> ImportLog:
+    """Принять запрос поставщика на импорт своего прайса (ADR-026).
+
+    Источник — `Shop.url`: адрес задаёт сам поставщик при заведении
+    магазина, и отдельного источника у запуска нет.
+
+    Параллельный запуск отклоняется. Импорты одного магазина всё равно
+    сериализуются блокировкой строки в
+    `catalog.services.upsert_shop_price` (ADR-005), поэтому повторный
+    вызов не ускоряет обработку, а занимает воркер ожиданием.
+
+    Отличие от `schedule_price_import`: тот выражает низкоуровневое
+    «поставить запуск в очередь» и проверок очерёдности не делает.
+    """
+    try:
+        shop = Shop.objects.get(pk=shop_id)
+    except Shop.DoesNotExist as error:
+        raise ShopNotFound(f"Магазин {shop_id} не найден.") from error
+
+    unfinished = ImportLog.objects.filter(
+        shop_id=shop_id, status__in=UNFINISHED_STATUSES
+    ).first()
+
+    if unfinished is not None:
+        raise ImportAlreadyRunning(
+            f"Импорт магазина {shop_id} уже выполняется "
+            f"(запуск {unfinished.pk}, состояние {unfinished.status})."
+        )
+
+    return schedule_price_import(
+        shop_id=shop_id,
+        url=shop.url or "",
+        initiated_by=initiated_by,
+    )
