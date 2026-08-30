@@ -32,19 +32,27 @@ Implemented:
   profile, contacts (delivery addresses).
 - **suppliers** — the `Shop` model, price list download over a link (https
   only, timeouts, size limit, SSRF protection), YAML parsing, import
-  orchestration, a Celery import task with an explicit retry policy.
+  orchestration, a Celery task with an explicit retry policy, and the
+  `ImportLog` run journal: one record per run, an attempt counter, error
+  codes and result counters.
 - **catalog** — categories, products, supplier offers and product parameters;
   the price import service (upsert by `(shop, external_id)`, soft
   deactivation of offers that disappeared from the price list, reactivation
   of returning ones).
+- **admin** — shops with order acceptance toggling, the import journal in
+  read-only mode, users.
 
 In progress:
 
-- supplier API (triggering an import, switching order acceptance on and off);
+- supplier API — shop creation, triggering an import, switching order
+  acceptance on and off, listing the supplier's own orders;
 - catalog: product listing with filtering and search;
 - **orders** — shopping cart, order placement, order history;
 - **notifications** — emails to the customer, the administrator and the supplier;
-- warehouse admin, price list export, an application Docker image.
+- catalog and order admin, price list export, an application Docker image.
+
+A price import can currently only be started from the service layer or
+Celery: there is no endpoint and no admin action for it yet.
 
 ## Quick start
 
@@ -117,15 +125,30 @@ Interactive documentation is served at `/api/schema/swagger-ui/` and
 Request and response formats and error codes are described in
 [docs/api.md](docs/api.md) (in Russian).
 
+## Admin
+
+Django Admin is served at `/admin/` for users with `is_staff`. Access is
+granted through the standard groups and model permissions; suppliers are not
+given admin access and work through the API instead.
+
+| Section | What it offers |
+|---|---|
+| Shops | listing, search, editing the name and the link, actions to enable and disable order acceptance |
+| Import runs | the `ImportLog` journal, read-only: state, attempt count, import counters, error code and message |
+| Users | the standard Django admin, adapted to email-based login |
+
+Admin actions call the service layer and never modify the domain directly.
+Deleting domain records is forbidden, and bulk deletion is removed.
+
 ## Layout
 
 ```
 backend/
   config/      project settings, URL routes, Celery application
-  users/       users, authentication, contacts
-  suppliers/   suppliers, price list download and parsing, Celery import task
+  users/       users, authentication, contacts, admin
+  suppliers/   suppliers, price parsing, import journal and task, admin
     importers/   transport and file format
-    services/    import orchestration
+    services/    shop management, import scheduling and execution
   catalog/     categories, products, supplier offers
     services/    price import into the catalog (the domain's public interface)
 docs/          project documentation
