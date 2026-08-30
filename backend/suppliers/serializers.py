@@ -79,3 +79,50 @@ class ImportRunSerializer(serializers.Serializer):
 
     import_id = serializers.IntegerField()
     status = serializers.CharField()
+
+
+class ShopStateSerializer(serializers.Serializer):
+    """Переключение приёма заказов магазином (ADR-012)."""
+
+    state = serializers.BooleanField()
+
+
+class SupplierOrderItemSerializer(serializers.Serializer):
+    """Позиция заказа, относящаяся к прайсу поставщика."""
+
+    product_name = serializers.CharField()
+    quantity = serializers.IntegerField()
+    price = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class SupplierDeliverySerializer(serializers.Serializer):
+    """Получатель и адрес доставки на момент оформления (ADR-024)."""
+
+    last_name = serializers.CharField()
+    first_name = serializers.CharField()
+    middle_name = serializers.CharField()
+    phone = serializers.CharField()
+    email = serializers.CharField()
+    city = serializers.CharField()
+    street = serializers.CharField()
+    house = serializers.CharField()
+    structure = serializers.CharField()
+    building = serializers.CharField()
+    apartment = serializers.CharField()
+
+
+class SupplierOrderSerializer(serializers.Serializer):
+    """Заказ в выдаче поставщика.
+
+    Сериализует объекты сервисного слоя `orders.services`, а не модели:
+    `suppliers` стоит ниже `orders` в цепочке зависимостей и к их ORM не
+    обращается (ADR-002, ADR-016).
+    """
+
+    id = serializers.IntegerField()
+    confirmed_at = serializers.DateTimeField()
+    state = serializers.CharField()
+    items = SupplierOrderItemSerializer(many=True)
+    total = serializers.DecimalField(max_digits=12, decimal_places=2)
+    delivery = SupplierDeliverySerializer()

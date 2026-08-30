@@ -25,34 +25,36 @@ layer, and every significant architectural decision is recorded as an ADR.
 
 ## Status
 
-Implemented:
+The base part of the project is complete: registration with email confirmation,
+JWT authentication, a catalog of supplier offers, a cart spanning several
+suppliers, order placement with email notifications, and the supplier's own
+section of the API.
 
 - **users** — custom user model (email as login, `buyer`/`shop` types),
   registration with email confirmation, JWT authentication, password reset,
-  profile, contacts (delivery addresses).
+  profile, delivery points (recipient and address).
 - **suppliers** — the `Shop` model, price list download over a link (https
   only, timeouts, size limit, SSRF protection), YAML parsing, import
-  orchestration, a Celery task with an explicit retry policy, and the
-  `ImportLog` run journal: one record per run, an attempt counter, error
-  codes and result counters.
+  orchestration, a Celery task with an explicit retry policy, the `ImportLog`
+  run journal, and the supplier API: creating a shop, starting an import,
+  reading the run journal, toggling order acceptance, listing the orders that
+  contain the supplier's goods.
 - **catalog** — categories, products, supplier offers and product parameters;
-  the price import service (upsert by `(shop, external_id)`, soft
-  deactivation of offers that disappeared from the price list, reactivation
-  of returning ones).
+  the price import service (upsert by `(shop, external_id)`, soft deactivation
+  of offers that disappeared from the price list); a read-only API with
+  filtering and search.
+- **orders** — the cart as an order in the `basket` state, the order state
+  machine, checkout with a snapshot of the recipient, the address and the
+  prices, and order history.
+- **notifications** — the `send_email` Celery task and the public service
+  layer: registration and password reset emails, order confirmation for the
+  customer and an invoice for the administrator.
 - **admin** — shops with order acceptance toggling, the import journal in
   read-only mode, users.
 
-In progress:
-
-- supplier API — shop creation, triggering an import, switching order
-  acceptance on and off, listing the supplier's own orders;
-- catalog: product listing with filtering and search;
-- **orders** — shopping cart, order placement, order history;
-- **notifications** — emails to the customer, the administrator and the supplier;
-- catalog and order admin, price list export, an application Docker image.
-
-A price import can currently only be started from the service layer or
-Celery: there is no endpoint and no admin action for it yet.
+Only the advanced part is left: the warehouse and order admin (setting an
+order status and notifying the customer), price list export, and an
+application Docker image.
 
 ## Quick start
 
@@ -117,7 +119,24 @@ Base prefix is `/api/`. Authentication is JWT: `Authorization: Bearer <access>`.
 | POST | `/api/auth/password-reset/confirm/` | public |
 | GET, PATCH | `/api/users/profile/` | authenticated |
 | GET, POST | `/api/users/contacts/` | authenticated |
-| GET, PUT, PATCH | `/api/users/contacts/{id}/` | authenticated |
+| GET, PUT, PATCH, DELETE | `/api/users/contacts/{id}/` | authenticated |
+| GET | `/api/catalog/products/` | authenticated |
+| GET | `/api/catalog/products/{id}/` | authenticated |
+| GET | `/api/orders/cart/` | authenticated |
+| POST | `/api/orders/cart/items/` | authenticated |
+| PATCH, DELETE | `/api/orders/cart/items/{id}/` | authenticated |
+| POST | `/api/orders/checkout/` | authenticated |
+| GET | `/api/orders/` | authenticated |
+| GET | `/api/orders/{id}/` | authenticated |
+| POST | `/api/suppliers/` | suppliers |
+| GET | `/api/suppliers/{id}/` | suppliers |
+| POST | `/api/suppliers/{id}/import/` | suppliers |
+| GET | `/api/suppliers/{id}/imports/` | suppliers |
+| PATCH | `/api/suppliers/{id}/state/` | suppliers |
+| GET | `/api/suppliers/{id}/orders/` | suppliers |
+
+The catalog supports filtering (`shop`, `product__category`) and search
+(`search`). Accessing another user's object returns `404`, not `403`.
 
 Interactive documentation is served at `/api/schema/swagger-ui/` and
 `/api/schema/redoc/`, the machine-readable schema at `/api/schema/`.
@@ -145,18 +164,24 @@ Deleting domain records is forbidden, and bulk deletion is removed.
 ```
 backend/
   config/      project settings, URL routes, Celery application
-  users/       users, authentication, contacts, admin
-  suppliers/   suppliers, price parsing, import journal and task, admin
+  tests/       the end-to-end base scenario
+  users/       users, authentication, delivery points, admin
+  suppliers/   suppliers, price parsing, import journal and task, API, admin
     importers/   transport and file format
     services/    shop management, import scheduling and execution
-  catalog/     categories, products, supplier offers
+  catalog/     categories, products, supplier offers, read-only API
     services/    price import into the catalog (the domain's public interface)
+  orders/      cart, order state machine, checkout, order history
+    services/    basket, checkout, state transitions, supplier order queries
+  notifications/  the email task and the public notification service
 docs/          project documentation
 ```
 
 Every application owns its domain; another domain is reached only through its
-public service layer (`<app>.services`). The model-level dependency direction
-is `catalog → suppliers → users`.
+public service layer (`<app>.services`). The dependency direction is
+`notifications → orders → catalog → suppliers → users`: a domain lower in the
+chain is reached through the ORM, a domain higher in it only through its public
+service layer.
 
 ## Development
 

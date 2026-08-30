@@ -26,6 +26,12 @@ from orders.services.exceptions import (
     ShopNotAcceptingOrders,
 )
 from orders.services.state import can_transition, transition
+from orders.services.supplier_orders import (
+    SupplierDeliveryData,
+    SupplierOrderData,
+    SupplierOrderItemData,
+    supplier_orders,
+)
 
 __all__ = (
     "BasketItemNotFound",
@@ -40,11 +46,15 @@ __all__ = (
     "OfferUnavailable",
     "OrdersServiceError",
     "ShopNotAcceptingOrders",
+    "SupplierDeliveryData",
+    "SupplierOrderData",
+    "SupplierOrderItemData",
     "add_item",
     "can_transition",
     "checkout_order",
     "get_or_create_basket",
     "remove_item",
+    "supplier_orders",
     "transition",
     "update_item_quantity",
 )

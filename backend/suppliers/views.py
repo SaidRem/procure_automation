@@ -19,12 +19,15 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from orders import services as order_services
 from suppliers import services
 from suppliers.models import ImportLog, Shop
 from suppliers.serializers import (
     ImportLogSerializer,
     ImportRunSerializer,
     ShopSerializer,
+    ShopStateSerializer,
+    SupplierOrderSerializer,
 )
 from users.models import UserType
 
@@ -127,4 +130,48 @@ class ShopViewSet(
 
         page = self.paginate_queryset(runs)
         serializer = ImportLogSerializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
+
+    @extend_schema(
+        summary="Переключение приёма заказов",
+        description=(
+            "Включает и отключает приём заказов магазином. На видимость "
+            "товаров в каталоге не влияет: отключённый приём заказов — "
+            "временное состояние поставщика, а не снятие товаров с "
+            "продажи (ADR-025)."
+        ),
+        request=ShopStateSerializer,
+        responses={200: ShopSerializer},
+    )
+    @action(detail=True, methods=("patch",), url_path="state", url_name="state")
+    def state(self, request: Request, pk: int) -> Response:
+        """Переключить приём заказов своего магазина."""
+        shop = self.get_object()
+        serializer = ShopStateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        updated = services.set_shop_state(
+            shop.pk, state=serializer.validated_data["state"]
+        )
+
+        return Response(ShopSerializer(updated).data)
+
+    @extend_schema(
+        summary="Заказы с товарами поставщика",
+        description=(
+            "Оформленные заказы, содержащие позиции из прайса этого "
+            "магазина. Заказ показан только своими позициями: товары "
+            "других поставщиков в одном заказе поставщику не видны. "
+            "Корзины в выдачу не попадают."
+        ),
+        responses={200: SupplierOrderSerializer(many=True)},
+    )
+    @action(detail=True, methods=("get",))
+    def orders(self, request: Request, pk: int) -> Response:
+        """Вернуть заказы с товарами своего магазина."""
+        shop = self.get_object()
+        found = order_services.supplier_orders(shop_id=shop.pk)
+
+        page = self.paginate_queryset(found)
+        serializer = SupplierOrderSerializer(page, many=True)
         return self.get_paginated_response(serializer.data)

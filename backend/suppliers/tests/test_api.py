@@ -28,6 +28,14 @@ def imports_url(shop: Shop) -> str:
     return reverse("suppliers:shop-imports", args=[shop.pk])
 
 
+def state_url(shop: Shop) -> str:
+    return reverse("suppliers:shop-state", args=[shop.pk])
+
+
+def orders_url(shop: Shop) -> str:
+    return reverse("suppliers:shop-orders", args=[shop.pk])
+
+
 def authenticate(user: User) -> APIClient:
     client = APIClient()
     client.credentials(
@@ -332,3 +340,211 @@ class TestPermissions:
         """Физическое удаление магазина не предусмотрено (ADR-012)."""
         assert supplier_client.delete(detail_url(shop)).status_code == 405
         assert Shop.objects.filter(pk=shop.pk).exists()
+
+
+@pytest.mark.django_db
+class TestShopState:
+    """PATCH /api/suppliers/{id}/state/."""
+
+    def test_disables_order_acceptance(self, supplier_client, shop) -> None:
+        response = supplier_client.patch(
+            state_url(shop), {"state": False}, format="json"
+        )
+
+        assert response.status_code == 200
+        assert response.data["state"] is False
+        shop.refresh_from_db()
+        assert shop.state is False
+
+    def test_enables_order_acceptance(self, supplier_client, shop) -> None:
+        shop.state = False
+        shop.save(update_fields=["state"])
+
+        response = supplier_client.patch(
+            state_url(shop), {"state": True}, format="json"
+        )
+
+        assert response.status_code == 200
+        shop.refresh_from_db()
+        assert shop.state is True
+
+    def test_is_idempotent(self, supplier_client, shop) -> None:
+        supplier_client.patch(state_url(shop), {"state": False}, format="json")
+        response = supplier_client.patch(
+            state_url(shop), {"state": False}, format="json"
+        )
+
+        assert response.status_code == 200
+        shop.refresh_from_db()
+        assert shop.state is False
+
+    def test_missing_state_is_rejected(self, supplier_client, shop) -> None:
+        response = supplier_client.patch(state_url(shop), {}, format="json")
+
+        assert response.status_code == 400
+        assert "state" in response.data
+
+    def test_foreign_shop_is_not_found(self, supplier_client, other_shop) -> None:
+        response = supplier_client.patch(
+            state_url(other_shop), {"state": False}, format="json"
+        )
+
+        assert response.status_code == 404
+        other_shop.refresh_from_db()
+        assert other_shop.state is True
+
+    def test_catalog_visibility_is_not_affected(
+        self, supplier_client, shop, supplier
+    ) -> None:
+        """Отключение приёма заказов не убирает товары из каталога (ADR-025)."""
+        from catalog.models import Category, Product, ProductInfo
+
+        category = Category.objects.create(name="Смартфоны")
+        product = Product.objects.create(name="Телефон", category=category)
+        offer = ProductInfo.objects.create(
+            product=product,
+            shop=shop,
+            external_id=1,
+            quantity=5,
+            price="100.00",
+            price_rrc="120.00",
+        )
+
+        supplier_client.patch(state_url(shop), {"state": False}, format="json")
+        offer.refresh_from_db()
+
+        assert offer.is_active is True
+
+
+@pytest.mark.django_db
+class TestSupplierOrders:
+    """GET /api/suppliers/{id}/orders/."""
+
+    @pytest.fixture
+    def placed_order(self, shop, other_shop, db):
+        """Заказ покупателя с товарами двух поставщиков."""
+        from catalog.models import Category, Product, ProductInfo
+        from orders.services import add_item, checkout_order
+        from users.models import Contact, User
+
+        buyer = User.objects.create_user(
+            email="buyer@example.com", password="StrongPass123!", is_active=True
+        )
+        contact = Contact.objects.create(
+            user=buyer,
+            last_name="Петров",
+            first_name="Пётр",
+            city="Москва",
+            street="Тверская",
+            phone="+70000000000",
+        )
+        category = Category.objects.create(name="Смартфоны")
+
+        own = ProductInfo.objects.create(
+            product=Product.objects.create(name="Свой товар", category=category),
+            shop=shop,
+            external_id=1,
+            quantity=10,
+            price="1000.00",
+            price_rrc="1200.00",
+        )
+        foreign = ProductInfo.objects.create(
+            product=Product.objects.create(name="Чужой товар", category=category),
+            shop=other_shop,
+            external_id=2,
+            quantity=10,
+            price="2000.00",
+            price_rrc="2200.00",
+        )
+
+        add_item(buyer, own, 2)
+        add_item(buyer, foreign, 3)
+        return checkout_order(buyer, contact.pk)
+
+    def test_lists_orders_with_own_goods(
+        self, supplier_client, shop, placed_order
+    ) -> None:
+        response = supplier_client.get(orders_url(shop))
+
+        assert response.status_code == 200
+        assert [item["id"] for item in response.data["results"]] == [placed_order.pk]
+
+    def test_shows_only_own_items(self, supplier_client, shop, placed_order) -> None:
+        """Товары другого поставщика в том же заказе не видны."""
+        order = supplier_client.get(orders_url(shop)).data["results"][0]
+
+        assert [item["product_name"] for item in order["items"]] == ["Свой товар"]
+        assert order["total"] == "2000.00"
+
+    def test_contains_delivery_snapshot(
+        self, supplier_client, shop, placed_order
+    ) -> None:
+        """Поставщику нужен адрес отгрузки (ADR-024)."""
+        order = supplier_client.get(orders_url(shop)).data["results"][0]
+
+        assert order["delivery"]["last_name"] == "Петров"
+        assert order["delivery"]["city"] == "Москва"
+        assert order["delivery"]["phone"] == "+70000000000"
+
+    def test_uses_snapshot_prices(self, supplier_client, shop, placed_order) -> None:
+        """Изменение прайса не переписывает выданный заказ (ADR-003)."""
+        offer = placed_order.items.filter(product_info__shop=shop).get().product_info
+        offer.price = "1.00"
+        offer.save(update_fields=["price"])
+
+        order = supplier_client.get(orders_url(shop)).data["results"][0]
+
+        assert order["items"][0]["price"] == "1000.00"
+        assert order["total"] == "2000.00"
+
+    def test_basket_is_not_listed(self, supplier_client, shop) -> None:
+        """Чужая корзина не попадает в выдачу поставщика (ADR-009)."""
+        from catalog.models import Category, Product, ProductInfo
+        from orders.services import add_item
+        from users.models import User
+
+        buyer = User.objects.create_user(
+            email="cart@example.com", password="StrongPass123!", is_active=True
+        )
+        category = Category.objects.create(name="Смартфоны")
+        offer = ProductInfo.objects.create(
+            product=Product.objects.create(name="В корзине", category=category),
+            shop=shop,
+            external_id=7,
+            quantity=5,
+            price="100.00",
+            price_rrc="120.00",
+        )
+        add_item(buyer, offer, 1)
+
+        assert supplier_client.get(orders_url(shop)).data["count"] == 0
+
+    def test_orders_without_own_goods_are_not_listed(
+        self, other_supplier, other_shop, placed_order, shop
+    ) -> None:
+        """Поставщик видит заказ только если в нём есть его товар."""
+        from catalog.models import Category, Product, ProductInfo
+
+        category = Category.objects.get(name="Смартфоны")
+        ProductInfo.objects.create(
+            product=Product.objects.create(name="Не заказан", category=category),
+            shop=other_shop,
+            external_id=99,
+            quantity=1,
+            price="10.00",
+            price_rrc="12.00",
+        )
+        client = authenticate(other_supplier)
+
+        response = client.get(orders_url(other_shop))
+
+        assert response.data["count"] == 1
+
+    def test_foreign_shop_is_not_found(self, supplier_client, other_shop) -> None:
+        assert supplier_client.get(orders_url(other_shop)).status_code == 404
+
+    def test_buyer_is_denied(self, buyer, shop) -> None:
+        assert authenticate(buyer).get(orders_url(shop)).status_code == 403
+
+    def test_anonymous_is_denied(self, shop) -> None:
+        assert APIClient().get(orders_url(shop)).status_code == 401

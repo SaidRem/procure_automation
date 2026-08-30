@@ -9,9 +9,10 @@
 
 from __future__ import annotations
 
+from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import QuerySet
 from drf_spectacular.utils import extend_schema, extend_schema_view
-from rest_framework import permissions, viewsets
+from rest_framework import filters, permissions, viewsets
 
 from catalog.models import ProductInfo
 from catalog.serializers import CatalogOfferSerializer
@@ -24,7 +25,9 @@ from catalog.serializers import CatalogOfferSerializer
         description=(
             "Активные предложения поставщиков. Предложения поставщика, "
             "временно не принимающего заказы, остаются в выдаче с "
-            "признаком `shop_accepts_orders=false`."
+            "признаком `shop_accepts_orders=false`.\n\n"
+            "Фильтрация — по магазину и категории, поиск (`search`) — по "
+            "названию товара, модели, категории и названию магазина."
         ),
     ),
     retrieve=extend_schema(summary="Предложение по идентификатору"),
@@ -34,6 +37,22 @@ class CatalogOfferViewSet(viewsets.ReadOnlyModelViewSet):
 
     serializer_class = CatalogOfferSerializer
     permission_classes = (permissions.IsAuthenticated,)
+
+    # Поиск подключается на уровне представления, а не глобально: он
+    # осмыслен для каталога и бесполезен для остальных разделов.
+    filter_backends = (DjangoFilterBackend, filters.SearchFilter)
+
+    # Фильтры выражены полями предложения. Признак приёма заказов сюда
+    # не входит: он не влияет на видимость товара (ADR-025), а фильтр по
+    # нему предлагал бы покупателю прятать часть каталога.
+    filterset_fields = ("shop", "product__category")
+
+    search_fields = (
+        "product__name",
+        "model",
+        "product__category__name",
+        "shop__name",
+    )
 
     def get_queryset(self) -> QuerySet[ProductInfo]:
         """Активные предложения с предзагрузкой связей.

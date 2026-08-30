@@ -161,22 +161,31 @@ class ProfileView(generics.RetrieveUpdateAPIView):
     retrieve=extend_schema(summary="Контакт текущего пользователя"),
     update=extend_schema(summary="Замена контакта"),
     partial_update=extend_schema(summary="Изменение контакта"),
+    destroy=extend_schema(
+        summary="Удаление контакта",
+        description=(
+            "Удаляет адрес из адресной книги. История заказов не "
+            "меняется: оформленный заказ хранит snapshot получателя и "
+            "адреса, а ссылка на контакт обнуляется (ADR-024)."
+        ),
+    ),
 )
 class ContactViewSet(
     mixins.ListModelMixin,
     mixins.CreateModelMixin,
     mixins.RetrieveModelMixin,
     mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
     """Точки доставки текущего пользователя: получатель и адрес.
 
-    Удаление не поддерживается. Исходная причина — участие контакта в
-    истории заказов — снята решением ADR-024: заказ хранит snapshot
-    получателя и адреса, а `Order.contact` объявлен `SET_NULL`, поэтому
-    удаление контакта историю не изменяет. DELETE появится вместе с
-    приложением `orders`, в котором snapshot реализуется: до тех пор
-    удаление контакта оставило бы уже созданные заказы без адреса.
+    Удаление разрешено (ADR-024): после появления snapshot в заказе
+    контакт является записью адресной книги, а не исторической записью.
+    Оформленный заказ хранит получателя и адрес в собственных полях
+    `delivery_*`, а `Order.contact` объявлен `SET_NULL` — удаление
+    адреса обнуляет ссылку и не трогает ни состав, ни сумму, ни адрес
+    доставки заказа.
     """
 
     serializer_class = ContactSerializer

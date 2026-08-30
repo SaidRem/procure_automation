@@ -7,7 +7,13 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from catalog.models import Parameter, Product, ProductInfo, ProductParameter
+from catalog.models import (
+    Category,
+    Parameter,
+    Product,
+    ProductInfo,
+    ProductParameter,
+)
 from users.models import User
 
 LIST_URL = reverse("catalog:product-list")
@@ -161,3 +167,68 @@ class TestCatalogPermissions:
         """Каталог только на чтение: запись выполняет импорт."""
         assert auth_client.post(LIST_URL, {}, format="json").status_code == 405
         assert auth_client.delete(detail_url(product_info)).status_code == 405
+
+
+@pytest.mark.django_db
+class TestCatalogFilteringAndSearch:
+    """Фильтрация и поиск (private/screens.md)."""
+
+    @pytest.fixture
+    def second_offer(self, other_shop, db) -> ProductInfo:
+        category = Category.objects.create(name="Ноутбуки")
+        product = Product.objects.create(name="Ноутбук Lenovo IdeaPad", category=category)
+        return ProductInfo.objects.create(
+            product=product,
+            shop=other_shop,
+            external_id=999,
+            quantity=3,
+            price="60000.00",
+            price_rrc="65000.00",
+        )
+
+    def test_filter_by_shop(self, auth_client, product_info, second_offer) -> None:
+        response = auth_client.get(LIST_URL, {"shop": product_info.shop_id})
+
+        assert [item["id"] for item in response.data["results"]] == [product_info.pk]
+
+    def test_filter_by_category(self, auth_client, product_info, second_offer) -> None:
+        response = auth_client.get(
+            LIST_URL, {"product__category": second_offer.product.category_id}
+        )
+
+        assert [item["id"] for item in response.data["results"]] == [second_offer.pk]
+
+    def test_search_by_product_name(self, auth_client, product_info, second_offer) -> None:
+        response = auth_client.get(LIST_URL, {"search": "Lenovo"})
+
+        assert [item["id"] for item in response.data["results"]] == [second_offer.pk]
+
+    def test_search_by_shop_name(self, auth_client, product_info, second_offer) -> None:
+        response = auth_client.get(LIST_URL, {"search": product_info.shop.name})
+
+        assert [item["id"] for item in response.data["results"]] == [product_info.pk]
+
+    def test_search_by_category(self, auth_client, product_info, second_offer) -> None:
+        response = auth_client.get(LIST_URL, {"search": "Ноутбуки"})
+
+        assert [item["id"] for item in response.data["results"]] == [second_offer.pk]
+
+    def test_search_is_case_insensitive(self, auth_client, second_offer) -> None:
+        assert auth_client.get(LIST_URL, {"search": "lenovo"}).data["count"] == 1
+
+    def test_filter_does_not_reveal_inactive(
+        self, auth_client, product_info, second_offer
+    ) -> None:
+        """Фильтр не обходит правило видимости (ADR-025)."""
+        product_info.is_active = False
+        product_info.save(update_fields=["is_active"])
+
+        response = auth_client.get(LIST_URL, {"shop": product_info.shop_id})
+
+        assert response.data["count"] == 0
+
+    def test_no_match_returns_empty_page(self, auth_client, product_info) -> None:
+        response = auth_client.get(LIST_URL, {"search": "нет такого товара"})
+
+        assert response.status_code == 200
+        assert response.data["count"] == 0

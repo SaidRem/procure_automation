@@ -180,13 +180,23 @@ class TestContacts:
         assert response.status_code == 400
         assert "last_name" in response.data
 
-    def test_delete_is_not_allowed(self, auth_client, active_user, contact_payload) -> None:
+    def test_delete_own_contact(self, auth_client, active_user, contact_payload) -> None:
+        """Контакт — запись адресной книги и удаляется (ADR-024)."""
         contact = Contact.objects.create(user=active_user, **contact_payload)
 
         response = auth_client.delete(detail_url(contact))
 
-        assert response.status_code == 405
-        assert Contact.objects.filter(pk=contact.pk).exists()
+        assert response.status_code == 204
+        assert not Contact.objects.filter(pk=contact.pk).exists()
+
+    def test_delete_foreign_contact_is_not_found(
+        self, auth_client, other_user, contact_payload
+    ) -> None:
+        """Чужой контакт неотличим от несуществующего."""
+        foreign = Contact.objects.create(user=other_user, **contact_payload)
+
+        assert auth_client.delete(detail_url(foreign)).status_code == 404
+        assert Contact.objects.filter(pk=foreign.pk).exists()
 
     def test_anonymous_access_is_denied(self, api_client) -> None:
         assert api_client.get(LIST_URL).status_code == 401
