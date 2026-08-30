@@ -54,7 +54,20 @@ class User(AbstractUser):
 
 
 class Contact(models.Model):
-    """Контактные данные и адрес доставки пользователя."""
+    """Точка доставки пользователя: получатель и адрес (ADR-027).
+
+    Модель описывает не только адрес, но и того, кому передаётся заказ.
+    Получатель не выводится из `User`: заказ оформляет сотрудник, а
+    принимает товар кладовщик или сотрудник другого магазина сети, и
+    подстановка имени владельца учётной записи выдавала бы оформившего
+    за принимающего.
+
+    Поля получателя объявлены `blank=True` намеренно (ADR-027):
+    существующие строки не могут задним числом обрести имя получателя, а
+    миграция со значением по умолчанию вписала бы в них заглушку.
+    Обязательность `last_name` и `first_name` выражена сериализатором и
+    правилом перехода `basket` -> `new` (ADR-022), а не схемой.
+    """
 
     user = models.ForeignKey(
         User,
@@ -62,6 +75,21 @@ class Contact(models.Model):
         related_name="contacts",
         on_delete=models.CASCADE,
     )
+
+    # Получатель заказа. Длина 150 совпадает с одноимёнными полями User,
+    # чтобы значение, скопированное из учётной записи, не усекалось.
+    last_name = models.CharField("Фамилия получателя", max_length=150, blank=True)
+    first_name = models.CharField("Имя получателя", max_length=150, blank=True)
+    middle_name = models.CharField("Отчество получателя", max_length=150, blank=True)
+    email = models.EmailField(
+        "Email получателя",
+        blank=True,
+        help_text=(
+            "Реквизит доставки. Письма сервиса отправляются на email "
+            "учётной записи и только на него (ADR-027)."
+        ),
+    )
+
     city = models.CharField("Город", max_length=50)
     street = models.CharField("Улица", max_length=100)
     house = models.CharField("Дом", max_length=15, blank=True)

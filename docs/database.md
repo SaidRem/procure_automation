@@ -19,10 +19,10 @@ PostgreSQL.
 - Денежные значения хранятся как DecimalField(max_digits=12,
   decimal_places=2); float для цен и сумм не используется (ADR-015,
   docs/decisions.md).
-- Адрес доставки оформленного заказа хранится snapshot-полями Order и
-  не зависит от записи users.Contact: контакт может быть изменён или
-  удалён, история заказов при этом не меняется (ADR-024,
-  docs/decisions.md).
+- Данные доставки оформленного заказа — получатель и адрес — хранятся
+  snapshot-полями Order и не зависят от записи users.Contact: контакт
+  может быть изменён или удалён, история заказов при этом не меняется
+  (ADR-024, ADR-027, docs/decisions.md).
 - Доступность предложения в каталоге и его доступность к заказу —
   разные проверки: выдача фильтрует только is_active, приём заказов
   (Shop.state) и остаток проверяются при работе с корзиной и заказом
@@ -49,11 +49,31 @@ PostgreSQL.
   (users.managers.UserManager).
   Meta: ordering ('email',). Других ограничений, кроме unique email, нет.
 
-- Contact (адрес доставки; FK -> User, related_name='contacts',
-  on_delete=CASCADE):
+- Contact (точка доставки: получатель и адрес; FK -> User,
+  related_name='contacts', on_delete=CASCADE):
   city — CharField(max_length=50), street — CharField(max_length=100),
   phone — CharField(max_length=20) — обязательные;
   house, structure, building, apartment — CharField(max_length=15, blank).
+
+  Данные получателя заказа (ADR-027; миграция
+  users/0002_contact_recipient): last_name, first_name, middle_name —
+  CharField(max_length=150, blank); email — EmailField(blank). Длина 150
+  совпадает с одноимёнными полями User, чтобы скопированное значение не
+  усекалось.
+
+  Миграция состоит из четырёх AddField и не содержит backfill:
+  существующие строки получают пустые значения (ADR-027). В PostgreSQL
+  колонки объявлены NOT NULL со снятым после добавления DEFAULT ''.
+
+  Обязательность last_name и first_name выражается сериализатором и
+  правилом перехода basket -> new (ADR-022, ADR-027), а не схемой:
+  существующие строки не могут задним числом обрести имя получателя,
+  а миграция с значением по умолчанию вписала бы в них заглушку.
+  Уникальности email нет: адрес повторяется между контактами.
+
+  Contact.email — реквизит доставки. Письма сервиса отправляются на
+  User.email и только на него (ADR-027, ADR-004).
+
   Constraints и soft delete отсутствуют намеренно (ADR-003, ADR-024):
   историчность адреса доставки обеспечивается snapshot-полями Order на
   момент подтверждения заказа, а не сохранением записи Contact.
@@ -191,11 +211,21 @@ suppliers/0001_initial).
 
 ### orders
 
-Не реализовано: приложение будет создано после notifications (ADR-010,
-amendment). Раздел фиксирует схему, вытекающую из принятых решений.
+Реализован модельный слой (миграция orders/0001_initial). Сервисы, API и
+админка заказов ещё не созданы.
+
+Порядок работ из amendment ADR-010 («orders создаётся после
+notifications») не нарушен: правило касается вызова уведомлений из
+сервисного слоя orders, а модели заказа от notifications не зависят.
 
 - Order (dt, confirmed_at, state; FK -> User, FK -> users.Contact —
-  nullable; snapshot-поля адреса доставки)
+  nullable; snapshot-поля доставки)
+
+  user — FK -> users.User (related_name='orders',
+  on_delete=PROTECT). PROTECT, а не CASCADE: заказ — историческая
+  запись, и удаление пользователя вместе с его историей должно быть
+  осознанным действием, а не побочным эффектом (та же логика, что у
+  Shop.user в ADR-012).
 
   Корзина — это Order в состоянии state='basket' (ADR-009), отдельной
   модели корзины нет. Следствия для схемы:
@@ -207,10 +237,28 @@ amendment). Раздел фиксирует схему, вытекающую и�
   - dt (auto_now_add) — момент создания корзины, а не оформления
     заказа.
 
-  state — CharField с закрытым набором значений: basket, new,
-  confirmed, assembled, sent, delivered, canceled. Схема хранит текущее
-  состояние; допустимые переходы задаются кодом orders.services и в
-  базе не выражаются (ADR-022). Модели истории смен статуса нет.
+  state — CharField(max_length=9, db_index) с закрытым набором
+  значений: basket, new, confirmed, assembled, sent, delivered,
+  canceled; значение по умолчанию — basket, единственное начальное
+  состояние (ADR-022). Схема хранит текущее состояние; допустимые
+  переходы задаются кодом orders.services и в базе не выражаются
+  (ADR-022). Модели истории смен статуса нет.
+
+  Закрытость набора выражена ограничением уровня БД
+  CheckConstraint(state__in=OrderState.values, name=
+  'order_state_is_known'): choices проверяются только формой и
+  full_clean(), а состояние заказа читают выборки истории, накладные и
+  админка.
+
+  Разделение корзин и заказов выполняет менеджер:
+  Order.objects.orders() исключает корзины, Order.objects.baskets() их
+  отбирает (ADR-009). Повторять условие в местах вызова нельзя —
+  незакрытый фильтр означает попадание чужих корзин в историю и в
+  письма.
+
+  Meta.ordering = ('-confirmed_at', '-id') — история заказов
+  сортируется по дате оформления (ADR-022); id даёт устойчивый порядок
+  при равных значениях.
 
   confirmed_at — DateTimeField(null, blank), заполняется один раз при
   переходе basket -> new. Это отдельная от dt отметка времени: dt
@@ -218,24 +266,74 @@ amendment). Раздел фиксирует схему, вытекающую и�
   «Номер, Дата, Сумма, Статус») показывает дату оформления и по ней же
   сортируется (ADR-022).
 
-  Snapshot адреса доставки (ADR-024) — семь полей, повторяющих
-  users.Contact: city, street, house, structure, building, apartment,
-  phone. Заполняются один раз при переходе basket -> new и далее не
+  Snapshot доставки (ADR-024, состав и наименование уточнены ADR-027) —
+  одиннадцать полей, повторяющих users.Contact с префиксом delivery_:
+
+    получатель — delivery_last_name, delivery_first_name,
+    delivery_middle_name, delivery_email, delivery_phone;
+    адрес — delivery_city, delivery_street, delivery_house,
+    delivery_structure, delivery_building, delivery_apartment.
+
+  Заполняются один раз при переходе basket -> new и далее не
   изменяются. На уровне схемы допускают пустое значение, так как у
-  корзины не заданы; у оформленного заказа непусты city, street, phone
-  — как и в Contact. Хранятся отдельными колонками, а не строкой или
-  JSONField: накладная и карточка заказа выводят адрес по частям.
+  корзины не заданы; у оформленного заказа непусты delivery_last_name,
+  delivery_first_name, delivery_city, delivery_street, delivery_phone
+  — как и обязательные поля Contact (ADR-027).
+
+  Хранятся отдельными колонками, а не строкой или JSONField: накладная
+  и карточка заказа выводят получателя и адрес по частям.
+
+  Префикс delivery_ обязателен: без него Order получил бы колонки
+  email, first_name, last_name, неотличимые по имени от данных
+  владельца заказа (order.user.email), и обращение к получателю вместо
+  учётной записи не вызывало бы ошибки (ADR-024, amendment; ADR-027).
 
   contact (FK -> users.Contact, on_delete=SET_NULL) служит только
-  трассируемостью и после удаления адреса становится NULL. Адрес
-  оформленного заказа читается из snapshot-полей Order, а не через
-  order.contact (ADR-024).
+  трассируемостью и после удаления контакта становится NULL. Получатель
+  и адрес оформленного заказа читаются из snapshot-полей Order, а не
+  через order.contact и не из User (ADR-024, ADR-027).
 
-  Физическое удаление Order и OrderItem не предусмотрено: отмена
-  выражается состоянием canceled (ADR-022).
+  Физическое удаление заказа запрещено: Order.delete() возбуждает
+  ProtectedError, отмена выражается состоянием canceled (ADR-022).
+  Правило распространяется и на корзину — она является заказом.
+  Ограничение действует на уровне экземпляра; массовое удаление через
+  queryset его не проходит и в коде проекта не используется (как у
+  Shop и ImportLog).
 
 - OrderItem (quantity, snapshot-поля — product_name, shop_name, price,
   price_rrc; FK -> catalog.ProductInfo, nullable, on_delete=SET_NULL)
+
+  order — FK -> Order (related_name='items', on_delete=CASCADE);
+  product_info — FK -> catalog.ProductInfo (related_name='order_items',
+  null, blank, on_delete=SET_NULL);
+  quantity — PositiveIntegerField;
+  product_name — CharField(max_length=80, blank),
+  shop_name — CharField(max_length=50, blank) — длины повторяют
+  catalog.Product.name и suppliers.Shop.name;
+  price, price_rrc — DecimalField(max_digits=12, decimal_places=2,
+  null, blank) (ADR-015). Денежные поля допускают NULL, а не пустую
+  строку: до подтверждения заказа snapshot не заполнен.
+
+  Ограничения:
+
+  - UniqueConstraint(fields=['order', 'product_info'],
+    name='unique_order_item_product_info') — одно предложение даёт одну
+    позицию, повторное добавление увеличивает количество. После
+    обнуления ссылки (SET_NULL) ограничение не действует: NULL в
+    PostgreSQL не конфликтует с NULL, и позиции снятых с продажи
+    предложений сосуществуют в одном заказе — это ожидаемо.
+  - CheckConstraint(quantity >= 1,
+    name='order_item_quantity_is_positive') — PositiveIntegerField
+    допускает ноль, а позиция с нулевым количеством не имеет смысла ни
+    в корзине, ни в накладной.
+
+  Удаление позиции разрешено только в корзине: OrderItem.delete()
+  возбуждает ProtectedError, если заказ находится не в состоянии
+  basket. Спецификация прямо требует удаление товара из корзины
+  (private/screens.md), тогда как позиция оформленного заказа входит в
+  его сумму и в накладную и её snapshot зафиксирован (ADR-003).
+  Правило закреплено амендментом ADR-022 от 2026-08-30; на Order
+  исключение не распространяется.
 
   Snapshot-поля допускают пустое значение: они заполняются один раз в
   момент подтверждения заказа (ADR-003) и до этого не заданы. Пока
@@ -263,9 +361,9 @@ amendment). Раздел фиксирует схему, вытекающую и�
 
 - catalog.ProductInfo → suppliers.Shop, catalog.Product (many-to-one)
 - catalog.ProductParameter → catalog.ProductInfo, catalog.Parameter
-- orders.Order → users.User; orders.Order → users.Contact (nullable,
-  on_delete=SET_NULL; трассируемость, не источник адреса оформленного
-  заказа — ADR-024)
+- orders.Order → users.User (many-to-one, on_delete=PROTECT);
+  orders.Order → users.Contact (nullable, on_delete=SET_NULL;
+  трассируемость, не источник адреса оформленного заказа — ADR-024)
 - orders.OrderItem → orders.Order, catalog.ProductInfo (nullable;
   используется как ссылка на актуальную карточку товара и как источник
   цены для корзины, но не для расчёта оформленного заказа)

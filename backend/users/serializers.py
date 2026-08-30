@@ -89,16 +89,35 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 
 class ContactSerializer(serializers.ModelSerializer):
-    """Контакт (адрес доставки) пользователя.
+    """Точка доставки пользователя: получатель и адрес (ADR-027).
 
     Владелец не приходит из запроса: он подставляется из текущего
     пользователя во view.
+
+    Обязательность полей получателя выражена здесь, а не схемой:
+    `Contact.last_name` и `Contact.first_name` объявлены `blank=True`,
+    чтобы миграция не вписывала заглушку в существующие строки
+    (ADR-027). Поэтому `required` задаётся явно — по умолчанию
+    `ModelSerializer` вывел бы из `blank=True` необязательное поле.
+
+    `email` получателя — реквизит доставки, а не канал связи сервиса:
+    письма отправляются на `User.email` и только на него (ADR-027).
     """
+
+    # PATCH остаётся частичным: DRF не требует отсутствующие поля при
+    # `partial=True`. Строгими являются создание и полная замена (PUT),
+    # то есть операции, задающие контакт целиком.
+    last_name = serializers.CharField(max_length=150)
+    first_name = serializers.CharField(max_length=150)
 
     class Meta:
         model = Contact
         fields = (
             "id",
+            "last_name",
+            "first_name",
+            "middle_name",
+            "email",
             "city",
             "street",
             "house",

@@ -73,3 +73,43 @@ class TestContactModel:
 
         assert contact in user.contacts.all()
         assert str(contact) == "Москва, Тверская 1"
+
+    def test_recipient_fields_are_optional_at_schema_level(self) -> None:
+        """Схема допускает контакт без получателя (ADR-027).
+
+        Обязательность выражена сериализатором и правилом оформления
+        заказа: строки, созданные до миграции, не могут задним числом
+        обрести имя получателя, а значение по умолчанию было бы
+        заглушкой в накладной.
+        """
+        user = User.objects.create_user(email="buyer@example.com", password="pass12345")
+
+        contact = Contact.objects.create(
+            user=user,
+            city="Москва",
+            street="Тверская",
+            phone="+70000000000",
+        )
+        contact.full_clean()
+
+        assert contact.last_name == ""
+        assert contact.first_name == ""
+        assert contact.middle_name == ""
+        assert contact.email == ""
+
+    def test_contact_stores_recipient(self) -> None:
+        user = User.objects.create_user(email="buyer@example.com", password="pass12345")
+
+        contact = Contact.objects.create(
+            user=user,
+            last_name="Петров",
+            first_name="Пётр",
+            middle_name="Петрович",
+            email="recipient@example.com",
+            city="Москва",
+            street="Тверская",
+            phone="+70000000000",
+        )
+        contact.full_clean()
+
+        assert contact.email != user.email
