@@ -15,7 +15,7 @@ layer, and every significant architectural decision is recorded as an ADR.
 
 | Layer | Tools |
 |---|---|
-| Backend | Python 3.14, Django 5.1, Django REST Framework |
+| Backend | Python 3.14, Django 5.2, Django REST Framework |
 | Authentication | JWT (`djangorestframework-simplejwt`) |
 | API documentation | drf-spectacular (OpenAPI 3) |
 | Storage | PostgreSQL 16 |

@@ -14,7 +14,7 @@ Backend-сервис автоматизации закупок в розничн
 
 | Слой | Инструменты |
 |---|---|
-| Backend | Python 3.14, Django 5.1, Django REST Framework |
+| Backend | Python 3.14, Django 5.2, Django REST Framework |
 | Аутентификация | JWT (`djangorestframework-simplejwt`) |
 | Документация API | drf-spectacular (OpenAPI 3) |
 | Хранилище | PostgreSQL 16 |
