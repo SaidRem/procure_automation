@@ -21,6 +21,17 @@ OFFER = {
 }
 
 
+@pytest.fixture(autouse=True)
+def celery_eager(settings) -> None:
+    """Выполнять Celery-задачи синхронно, без брокера.
+
+    Без этого постановка уведомлений при оформлении заказа уходила бы
+    в реальный broker, а тесты зависели бы от внешнего Redis.
+    """
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+
+
 @pytest.fixture
 def buyer(db) -> User:
     return User.objects.create_user(

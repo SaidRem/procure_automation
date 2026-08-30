@@ -8,6 +8,10 @@
 Остатки не списываются и не резервируются: полем `quantity` владеет
 прайс поставщика, и ближайший импорт перезаписал бы списание значением
 из файла (ADR-022, ADR-008).
+
+Уведомления ставятся через `notifications.services` (ADR-005): ни
+Celery-задачи, ни отправка писем здесь не вызываются. Письма уходят
+только после коммита оформления и их сбой заказ не отменяет.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 
+from notifications import services as notifications
 from orders.models import Order, OrderItem, OrderState
 from orders.services import state as state_service
 from orders.services.basket import check_orderable, get_or_create_basket
@@ -78,6 +83,12 @@ def checkout_order(user: User, contact_id: int) -> Order:
         basket.confirmed_at = timezone.now()
         state_service.transition(basket, OrderState.NEW, save=False)
         basket.save()
+
+        # Постановка внутри транзакции, отправка — после её коммита:
+        # `notifications.services` регистрирует коллбэк on_commit
+        # (ADR-005). Откат оформления не оставляет ни заказа, ни писем.
+        notifications.send_order_confirmation(basket.pk)
+        notifications.send_new_order_notification(basket.pk)
 
     logger.info(
         "Order placed: order_id=%s user_id=%s items=%s",

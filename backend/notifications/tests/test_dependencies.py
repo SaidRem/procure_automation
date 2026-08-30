@@ -32,11 +32,18 @@ def imported_modules(package: str) -> set[str]:
     return modules
 
 
-class TestNotificationsIsIndependent:
-    """notifications не знает о доменных приложениях."""
+class TestNotificationsDependencies:
+    """Границы приложения notifications.
 
-    @pytest.mark.parametrize("domain", ("users", "orders", "catalog", "suppliers"))
-    def test_does_not_import_domain_apps(self, domain: str) -> None:
+    Оно стоит на верхнем уровне цепочки зависимостей и опирается на
+    `orders` (`docs/database.md`): ADR-005 относит подтверждение заказа
+    и накладную администратору к его функциям, а собрать письмо, не
+    прочитав заказ, нельзя. Остальные домены остаются недоступными:
+    всё, что нужно письму, доступно через сам заказ.
+    """
+
+    @pytest.mark.parametrize("domain", ("users", "catalog", "suppliers"))
+    def test_does_not_import_lower_domains(self, domain: str) -> None:
         offending = {
             module
             for module in imported_modules("notifications")
@@ -45,8 +52,23 @@ class TestNotificationsIsIndependent:
 
         assert offending == set(), (
             f"notifications импортирует {domain}: {offending}. "
-            "Уведомления принимают примитивы и о доменах не знают (ADR-005)."
+            "Получатель и состав письма берутся из заказа, а не из "
+            "чужих моделей (ADR-005, ADR-024)."
         )
+
+    def test_reads_orders_models_only(self) -> None:
+        """Разрешён только доступ к моделям заказа, не к его сервисам."""
+        order_imports = {
+            module
+            for module in imported_modules("notifications")
+            if module.startswith("orders")
+        }
+
+        assert order_imports == {"orders.models"}
+
+    def test_orders_does_not_depend_back(self) -> None:
+        """Обратной зависимости нет: цикла между доменами не возникает."""
+        assert "notifications.tasks" not in imported_modules("orders")
 
 
 class TestUsersHasNoTemporaryDependency:
@@ -77,3 +99,7 @@ class TestOrdersDoesNotImportTasks:
 
         assert not any(module.startswith("celery") for module in modules)
         assert "notifications.tasks" not in modules
+
+    def test_orders_calls_notifications_service(self) -> None:
+        """Допустимое обращение: orders.services -> notifications.services."""
+        assert "notifications" in imported_modules("orders")

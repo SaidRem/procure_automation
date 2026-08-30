@@ -262,6 +262,9 @@ EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")
 EMAIL_USE_TLS = env("EMAIL_USE_TLS", "True") == "True"
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "noreply@example.com")
 
+# Адрес, на который уходит накладная по оформленному заказу.
+ORDER_ADMIN_EMAIL = env("ORDER_ADMIN_EMAIL", DEFAULT_FROM_EMAIL)
+
 
 # Logging
 # coding_rules.md: использовать logging, не использовать print().
