@@ -12,9 +12,9 @@ import logging
 from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
 
+from notifications.services import send_email_async
 from users.models import User
 from users.services.exceptions import InvalidPasswordResetToken
-from users.services.notifications import send_email_async
 from users.tokens import encode_uid, get_user_by_uid
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def request_password_reset(*, email: str) -> None:
 
     send_email_async(
         subject=RESET_SUBJECT,
-        message=(
+        body=(
             "Для установки нового пароля перейдите по ссылке.\n\n"
             f"Ссылка: {link}\n\n"
             f"uid: {uid}\ntoken: {token}"

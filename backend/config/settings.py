@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     'suppliers',
     'catalog',
     'orders',
+    'notifications',
 ]
 
 AUTH_USER_MODEL = 'users.User'

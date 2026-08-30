@@ -8,9 +8,9 @@ from typing import Any
 from django.conf import settings
 from django.db import transaction
 
+from notifications.services import send_email_async
 from users.models import User
 from users.services.exceptions import InvalidConfirmationToken
-from users.services.notifications import send_email_async
 from users.tokens import email_confirmation_token_generator, encode_uid, get_user_by_uid
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def send_confirmation_email(*, user: User) -> None:
 
     send_email_async(
         subject=CONFIRMATION_SUBJECT,
-        message=(
+        body=(
             "Для завершения регистрации подтвердите email.\n\n"
             f"Ссылка: {link}\n\n"
             f"uid: {uid}\ntoken: {token}"
